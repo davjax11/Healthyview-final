@@ -469,25 +469,35 @@ class PacienteModel {
     // --- FUNCIONES DE FORO (RFN-13) ---
 
    /**
-     */
-    /**
-     * Obtiene todas las publicaciones del foro (VERSIÓN CORREGIDA).
-     * Se eliminaron los comentarios internos para evitar errores del editor.
+     * Obtiene las publicaciones para el foro del paciente.
      */
     public function getPublicacionesForo($idPaciente) {
         $idUsuarioActual = $idPaciente; 
         
         $sql = "SELECT 
                     f.idPublicacion, f.titulo, f.contenido, f.imagenURL, f.fechaPublicacion,
-                    CONCAT(p.nombre, ' ', p.apellidoPaterno) as pacienteNombre,
+                    
+                    CASE 
+                        WHEN f.idPaciente IS NOT NULL THEN CONCAT(p.nombre, ' ', p.apellidoPaterno)
+                        WHEN f.idMedico IS NOT NULL THEN CONCAT('Dr. ', m.nombre, ' ', m.apellidoPaterno)
+                        WHEN f.idAdmin IS NOT NULL THEN CONCAT(a.nombre, ' (Admin)')
+                        ELSE 'Usuario Desconocido'
+                    END as autorNombre,
+                    
+                    CASE 
+                        WHEN f.idPaciente IS NOT NULL THEN 'Paciente'
+                        WHEN f.idMedico IS NOT NULL THEN 'Medico'
+                        WHEN f.idAdmin IS NOT NULL THEN 'Admin'
+                        ELSE 'Desconocido'
+                    END as autorRol,
                     COUNT(DISTINCT fr.idReaccion) as totalReacciones,
                     MAX(CASE WHEN fr.idPaciente = ? THEN 1 ELSE 0 END) as usuarioYaReacciono
                     
                 FROM foro f
                 LEFT JOIN paciente p ON f.idPaciente = p.idPaciente
+                LEFT JOIN medico m ON f.idMedico = m.idMedico
+                LEFT JOIN administrador a ON f.idAdmin = a.idAdmin
                 LEFT JOIN foroReaccion fr ON f.idPublicacion = fr.idPublicacion
-                
-                WHERE f.idPaciente IS NOT NULL
                 
                 GROUP BY f.idPublicacion
                 ORDER BY f.fechaPublicacion DESC
