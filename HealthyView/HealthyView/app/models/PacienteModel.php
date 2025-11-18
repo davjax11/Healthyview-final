@@ -352,7 +352,6 @@ class PacienteModel {
     /**
 
      * Obtiene todos los ítems (medicamentos/indicaciones) de una receta.
-     * (Similar a la de MedicoModel, pero la ponemos aquí para mantener el MVC).
      * @return array
      */
     public function getItemsDeReceta($idReceta) {
@@ -373,7 +372,7 @@ class PacienteModel {
         }
     }
 
-    // --- INICIO DE NUEVAS FUNCIONES (Gestión de Actividades - RFN-10) ---
+    // ---Gestión de Actividades - RFN-10 ---
 
     /**
      * Obtiene el historial de actividades asignadas a un paciente.
@@ -435,7 +434,6 @@ class PacienteModel {
             return false;
         }
     }
-    // --- FIN DE NUEVAS FUNCIONES ---
 
     /**
      * Obtiene el historial de seguimientos de un paciente específico.
