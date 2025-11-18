@@ -1,0 +1,597 @@
+<?php
+// Cargar el modelo de Medico
+include_once "app/models/MedicoModel.php";
+
+class MedicoController {
+    private $model;
+    private $connection;
+
+    // Constructor: recibe la conexión y crea un MedicoModel
+    public function __construct($connection) {
+        $this->connection = $connection;
+        $this->model = new MedicoModel($connection);
+    }
+
+    /**
+     * Muestra el dashboard principal del médico (AHORA ES LA VISTA DE INICIO)
+     */
+    public function dashboard() {
+        $idMedico = $_SESSION['usuario_id'];
+        
+        // 1. Obtener las citas de hoy (como ya lo tenías)
+        $citasHoy = $this->model->getDashboardData($idMedico);
+        
+        // 2. Obtener estadísticas generales (NUEVO)
+        $stats = $this->model->getEstadisticasMedico($idMedico);
+        
+        // 3. Cargar la vista
+        $pageTitle = "Panel Médico";
+        $activePage = 'inicio'; 
+        $viewToLoad = 'app/views/medico/view_medico_inicio.php'; 
+        
+        include_once 'app/views/medico/layout_medico.php';
+    }
+
+    /**
+     * Muestra la lista completa de citas del médico
+     * (Muestra alertas de éxito/error)
+     */
+    public function verCitas() {
+        $idMedico = $_SESSION['usuario_id'];
+        
+        // --- INICIO DE MODIFICACIÓN: Mensajes de alerta ---
+        $successMessage = null;
+        if (isset($_GET['success'])) {
+            $map = [
+                'cita_completada' => '¡Cita marcada como Completada!',
+                'cita_noasistida' => 'Cita marcada como No Asistida.'
+            ];
+            $successMessage = $map[$_GET['success']] ?? 'Operación exitosa.';
+        }
+        $errorMessage = null;
+        if (isset($_GET['error']) && $_GET['error'] == 'actualizar_fallo') {
+            $errorMessage = "Error al actualizar la cita. Es posible que no te pertenezca o ya estuviera actualizada.";
+        }
+        
+        // 1. Obtener la lista de TODAS las citas del médico
+        $listaCitas = $this->model->getCitasMedico($idMedico);
+        
+        // 2. Definir la página activa y la vista a cargar
+        $pageTitle = "Mis Citas Programadas";
+        $activePage = 'citas';
+        $viewToLoad = 'app/views/medico/view_medico_citas.php';
+        
+        // 3. Cargar la plantilla principal del médico
+        include_once 'app/views/medico/layout_medico.php';
+    }
+    
+    
+    /**
+     * Muestra la lista de pacientes asociados al médico
+     */
+    public function verPacientes() {
+        $idMedico = $_SESSION['usuario_id'];
+        
+        // 1. Obtener la lista de pacientes del médico
+        $listaPacientes = $this->model->getPacientesDelMedico($idMedico);
+        
+        // 2. Definir la página activa y la vista a cargar
+        $pageTitle = "Mis Pacientes";
+        $activePage = 'pacientes'; // <--- Página activa es "pacientes"
+        $viewToLoad = 'app/views/medico/view_medico_pacientes.php'; // <--- Carga la nueva vista
+        
+        // 3. Cargar la plantilla principal del médico
+        include_once 'app/views/medico/layout_medico.php';
+    }
+
+    /**
+     * Muestra el perfil detallado de un paciente específico.
+     */
+    public function verPerfilPaciente() {
+        if (!isset($_GET['idPaciente'])) {
+            header("Location: index.php?action=verPacientes");
+            exit();
+        }
+        
+        $idPaciente = (int)$_GET['idPaciente'];
+        $idMedico = $_SESSION['usuario_id'];
+        
+        $successMessage = null;
+       if (isset($_GET['success'])) {
+            $map = [
+                'seguimiento_registrado' => '¡Seguimiento registrado exitosamente!',
+                'receta_creada' => '¡Receta asignada exitosamente!',
+                'actividad_asignada' => '¡Actividad asignada exitosamente!' // <-- NUEVO
+            ];
+            $successMessage = $map[$_GET['success']] ?? 'Operación exitosa.';
+        }
+        $errorMessage = null;
+        if (isset($_GET['error'])) {
+             $map = [
+                'registro_fallido' => 'Error al registrar el seguimiento. Inténtalo de nuevo.',
+                'receta_fallida' => 'Error al asignar la receta. Inténtalo de nuevo.',
+                'asignacion_fallida' => 'Error al asignar la actividad.' // <-- NUEVO
+            ];
+            $errorMessage = $map[$_GET['error']] ?? 'Error desconocido.';
+        }
+
+        // 1. Obtener los datos del perfil del paciente
+        $datosPaciente = $this->model->getDatosPacienteParaMedico($idPaciente);
+        
+        if (!$datosPaciente) {
+            header("Location: index.php?action=verPacientes&error=no_encontrado");
+            exit();
+        }
+        
+        // 2. Obtener el historial de seguimientos (RFN-11)
+        $historialSeguimiento = $this->model->getHistorialSeguimiento($idPaciente);
+        
+        // 3. Obtener historial de recetas (RFN-06)
+        $historialRecetas = $this->model->getRecetasDelPaciente($idPaciente);
+        
+        // 4. --- NUEVO: Obtener historial de Actividades (RFN-07/10) ---
+        $historialActividades = $this->model->getActividadesDelPaciente($idPaciente);
+
+        // 5. Cargar la vista del perfil
+        $pageTitle = "Perfil de " . htmlspecialchars($datosPaciente['nombre']);
+        $activePage = 'pacientes';
+        $viewToLoad = 'app/views/medico/view_perfil_paciente.php';
+        
+        include_once 'app/views/medico/layout_medico.php';
+    }
+    /**
+     * Procesa el formulario de registro de seguimiento (RFN-11).
+     */
+    public function registrarSeguimiento() {
+        if (isset($_POST["registrarSeguimiento"])) {
+            $idPaciente = (int)$_POST['idPaciente'];
+            $idMedico = (int)$_SESSION['usuario_id'];
+            
+            $peso = (float)$_POST['peso'];
+            $estatura = (float)$_POST['estatura'];
+            $nivelBienestar = $_POST['nivelBienestar'];
+            $observaciones = trim($_POST['observaciones']);
+
+            // Calcular IMC (Copiado de la lógica del paciente, pero en servidor)
+            $imc = null;
+            if ($peso > 0 && $estatura > 0) {
+                $imc = $peso / ($estatura * $estatura);
+            }
+
+            // 1. Guardar en la tabla 'seguimiento'
+            $exitoSeguimiento = $this->model->registrarSeguimiento($idPaciente, $idMedico, $peso, $imc, $nivelBienestar, $observaciones);
+            
+            // 2. Actualizar la tabla 'paciente' con los datos más recientes
+             $exitoPaciente = $this->model->updatePacientePesoEstatura($idPaciente, $peso, $estatura, $imc);
+
+            if ($exitoSeguimiento && $exitoPaciente) {
+                header("Location: index.php?action=verPerfilPaciente&idPaciente=$idPaciente&success=seguimiento_registrado");
+            } else {
+                header("Location: index.php?action=verPerfilPaciente&idPaciente=$idPaciente&error=registro_fallido");
+            }
+            exit();
+        } else {
+            // Redirigir si se accede sin POST
+            header("Location: index.php?action=verPacientes");
+            exit();
+        }
+    }
+
+    /**
+     * Procesa la actualización de estado de una cita (Completada / No Asistida).
+     */
+    public function actualizarEstadoCita() {
+        if (!isset($_GET['idCita']) || !isset($_GET['estado'])) {
+            header("Location: index.php?action=verCitas");
+            exit();
+        }
+        
+        $idCita = (int)$_GET['idCita'];
+        $idMedico = (int)$_SESSION['usuario_id'];
+        $nuevoEstado = $_GET['estado']; // "Completada" o "NoAsistida"
+        
+        // Llamar al modelo para actualizar
+        $exito = $this->model->actualizarEstadoCita($idCita, $idMedico, $nuevoEstado);
+
+        if ($exito) {
+            $mensaje = ($nuevoEstado == 'Completada') ? 'cita_completada' : 'cita_noasistida';
+            header("Location: index.php?action=verCitas&success=$mensaje");
+        } else {
+            header("Location: index.php?action=verCitas&error=actualizar_fallo");
+        }
+        exit();
+    }
+    
+    /**
+     * Muestra el formulario para crear una nueva receta (RFN-06).
+     */
+    public function showCrearReceta() {
+        if (!isset($_GET['idPaciente'])) {
+            header("Location: index.php?action=verPacientes");
+            exit();
+        }
+        $idPaciente = (int)$_GET['idPaciente'];
+        
+        // Obtenemos los datos del paciente solo para mostrar su nombre
+        $datosPaciente = $this->model->getDatosPacienteParaMedico($idPaciente);
+        if (!$datosPaciente) {
+            header("Location: index.php?action=verPacientes&error=no_encontrado");
+            exit();
+        }
+
+        $pageTitle = "Asignar Receta";
+        $activePage = 'pacientes'; // Mantenemos "Pacientes" activo en el menú
+        $viewToLoad = 'app/views/medico/view_crear_receta.php'; // <--- Carga la nueva vista de formulario
+        
+        include_once 'app/views/medico/layout_medico.php';
+    }
+
+    /**
+     * Procesa el formulario de creación de receta (RFN-09).
+     */
+    public function crearReceta() {
+        if (isset($_POST["asignarReceta"])) {
+            $idPaciente = (int)$_POST['idPaciente'];
+            $idMedico = (int)$_SESSION['usuario_id'];
+            
+            $resumen = trim($_POST['resumen']);
+            $observaciones = trim($_POST['observaciones']);
+
+            // Guardar en la tabla 'receta'
+            $exito = $this->model->crearReceta($idPaciente, $idMedico, $resumen, $observaciones);
+
+            if ($exito) {
+                // Redirigir de vuelta al perfil del paciente
+                header("Location: index.php?action=verPerfilPaciente&idPaciente=$idPaciente&success=receta_creada");
+            } else {
+                // Redirigir de vuelta al formulario de creación con error
+                header("Location: index.php?action=showCrearReceta&idPaciente=$idPaciente&error=receta_fallida");
+            }
+            exit();
+        } else {
+            header("Location: index.php?action=verPacientes");
+            exit();
+        }
+    }
+
+    /**
+     * Muestra la página para gestionar los ítems de una receta específica (RFN-06).
+     */
+    public function gestionarReceta() {
+        if (!isset($_GET['idReceta'])) {
+            header("Location: index.php?action=verPacientes");
+            exit();
+        }
+        
+        $idReceta = (int)$_GET['idReceta'];
+        $idMedico = (int)$_SESSION['usuario_id'];
+        
+        // 1. Obtener datos de la receta (y validar que sea del médico)
+        $datosReceta = $this->model->getRecetaEspecifica($idReceta, $idMedico);
+        
+        if (!$datosReceta) {
+            // Si no existe o no es del médico, lo saca al perfil del paciente (si tenemos el ID)
+            $idPaciente = (int)$_GET['idPaciente'] ?? null;
+            if ($idPaciente) {
+                header("Location: index.php?action=verPerfilPaciente&idPaciente=$idPaciente&error=receta_no_encontrada");
+            } else {
+                header("Location: index.php?action=verPacientes");
+            }
+            exit();
+        }
+        
+        // 2. Obtener los ítems existentes de esta receta
+        $listaItems = $this->model->getItemsDeReceta($idReceta);
+
+        // 3. Manejar mensajes de éxito/error de las sub-acciones
+        $successMessage = null;
+        if (isset($_GET['success']) && $_GET['success'] == 'item_agregado') {
+            $successMessage = "¡Elemento agregado a la receta exitosamente!";
+        }
+        if (isset($_GET['success']) && $_GET['success'] == 'item_eliminado') {
+            $successMessage = "Elemento eliminado de la receta.";
+        }
+        $errorMessage = null;
+        if (isset($_GET['error']) && $_GET['error'] == 'item_fallido') {
+            $errorMessage = "Error. Inténtalo de nuevo.";
+        }
+        
+        // 4. Cargar la vista de gestión
+        $pageTitle = "Gestionar Receta";
+        $activePage = 'pacientes'; // Mantenemos "Pacientes" activo en el menú
+        $viewToLoad = 'app/views/medico/view_gestionar_receta.php'; // <--- Carga la nueva vista
+        
+        include_once 'app/views/medico/layout_medico.php';
+    }
+
+    /**
+     * Procesa el formulario para agregar un ítem a una receta.
+     */
+    public function agregarItemReceta() {
+        if (isset($_POST["agregarItem"])) {
+            $idReceta = (int)$_POST['idReceta'];
+            $idPaciente = (int)$_POST['idPaciente']; // Para la redirección
+            
+            // Validar que el médico sea dueño de la receta
+            $idMedico = (int)$_SESSION['usuario_id'];
+            $datosReceta = $this->model->getRecetaEspecifica($idReceta, $idMedico);
+            if (!$datosReceta) {
+                 header("Location: index.php?action=verPerfilPaciente&idPaciente=$idPaciente&error=item_fallido");
+                 exit();
+            }
+
+            // Recoger datos del formulario
+            $nombre = trim($_POST['nombreMedicamento']);
+            $dosis = trim($_POST['dosis']);
+            $frecuencia = trim($_POST['frecuencia']);
+            $duracion = trim($_POST['duracion']);
+            $instrucciones = trim($_POST['instrucciones']);
+            
+            $exito = $this->model->agregarItemReceta($idReceta, $nombre, $dosis, $frecuencia, $duracion, $instrucciones);
+
+            if ($exito) {
+                header("Location: index.php?action=gestionarReceta&idReceta=$idReceta&idPaciente=$idPaciente&success=item_agregado");
+            } else {
+                header("Location: index.php?action=gestionarReceta&idReceta=$idReceta&idPaciente=$idPaciente&error=item_fallido");
+            }
+            exit();
+        } else {
+            header("Location: index.php?action=verPacientes");
+            exit();
+        }
+    }
+
+    /**
+     * Procesa la eliminación de un ítem de una receta.
+     */
+    public function eliminarItemReceta() {
+        if (isset($_GET['idItem'])) {
+            $idItem = (int)$_GET['idItem'];
+            $idReceta = (int)$_GET['idReceta']; // Para la redirección
+            $idPaciente = (int)$_GET['idPaciente']; // Para la redirección
+            $idMedico = (int)$_SESSION['usuario_id'];
+            
+            $exito = $this->model->eliminarItemReceta($idItem, $idMedico);
+
+            if ($exito) {
+                header("Location: index.php?action=gestionarReceta&idReceta=$idReceta&idPaciente=$idPaciente&success=item_eliminado");
+            } else {
+                header("Location: index.php?action=gestionarReceta&idReceta=$idReceta&idPaciente=$idPaciente&error=item_fallido");
+            }
+            exit();
+        } else {
+            header("Location: index.php?action=verPacientes");
+            exit();
+        }
+    }
+
+    /**
+     * Muestra el formulario para asignar una actividad a un paciente.
+     */
+    public function showAsignarActividad() {
+        if (!isset($_GET['idPaciente'])) {
+            header("Location: index.php?action=verPacientes");
+            exit();
+        }
+        $idPaciente = (int)$_GET['idPaciente'];
+        
+        // 1. Obtener datos del paciente (para el encabezado)
+        $datosPaciente = $this->model->getDatosPacienteParaMedico($idPaciente);
+        if (!$datosPaciente) {
+            header("Location: index.php?action=verPacientes&error=no_encontrado");
+            exit();
+        }
+
+        // 2. Obtener el catálogo de actividades
+        $listaActividades = $this->model->getActividadesDisponibles();
+
+        $pageTitle = "Asignar Actividad";
+        $activePage = 'pacientes';
+        $viewToLoad = 'app/views/medico/view_asignar_actividad.php'; // <-- Nueva Vista
+        
+        include_once 'app/views/medico/layout_medico.php';
+    }
+
+    /**
+     * Procesa el formulario de asignación de actividad.
+     */
+    public function asignarActividad() {
+        if (isset($_POST["asignarActividad"])) {
+            $idPaciente = (int)$_POST['idPaciente'];
+            $idMedico = (int)$_SESSION['usuario_id'];
+            $idActividad = (int)$_POST['idActividad'];
+            $fechaAsignacion = $_POST['fechaAsignacion'];
+            $fechaInicio = $_POST['fechaInicio'];
+            $fechaFin = $_POST['fechaFin'];
+            $observaciones = trim($_POST['observaciones']);
+
+            $exito = $this->model->asignarActividadPaciente($idPaciente, $idMedico, $idActividad, $fechaAsignacion, $fechaInicio, $fechaFin, $observaciones);
+
+            if ($exito) {
+                header("Location: index.php?action=verPerfilPaciente&idPaciente=$idPaciente&success=actividad_asignada");
+            } else {
+                header("Location: index.php?action=showAsignarActividad&idPaciente=$idPaciente&error=asignacion_fallida");
+            }
+            exit();
+        } else {
+            header("Location: index.php?action=verPacientes");
+            exit();
+        }
+    }
+
+    /**
+     * Genera una vista de impresión con el historial completo del paciente.
+     */
+    public function verReporteClinico() {
+        // Validar sesión y permisos
+        if (!isset($_SESSION['usuario_id']) || $_SESSION['usuario_tipo'] != 'Medico') {
+            header("Location: index.php?action=showLogin");
+            exit();
+        }
+
+        if (!isset($_GET['idPaciente'])) {
+            header("Location: index.php?action=verPacientes");
+            exit();
+        }
+        
+        $idPaciente = (int)$_GET['idPaciente'];
+        
+        // 1. Recopilar TODA la información del paciente
+        $datosPaciente = $this->model->getDatosPacienteParaMedico($idPaciente);
+        $historialSeguimiento = $this->model->getHistorialSeguimiento($idPaciente);
+        $historialRecetas = $this->model->getRecetasDelPaciente($idPaciente);
+        $historialActividades = $this->model->getActividadesDelPaciente($idPaciente);
+        
+        if (!$datosPaciente) {
+            echo "Paciente no encontrado.";
+            exit();
+        }
+
+        // 2. Cargar la vista especial de reporte
+        include_once 'app/views/medico/view_reporte_clinico.php';
+    }
+
+   // --- ACCIONES DE PERFIL (MÉDICO) ---
+
+    public function showProfile() {
+        $idMedico = $_SESSION['usuario_id'];
+        $datosMedico = $this->model->getDatosMedico($idMedico);
+
+        if (!$datosMedico) {
+            header("Location: index.php?action=dashboard");
+            exit();
+        }
+
+        $pageTitle = "Mi Perfil Profesional";
+        $activePage = 'perfil'; 
+        $viewToLoad = 'app/views/medico/view_perfil.php';
+        
+        include_once 'app/views/medico/layout_medico.php';
+    }
+
+    public function updateProfile() {
+        if (isset($_POST["actualizar"])) {
+            $idMedico = $_SESSION['usuario_id'];
+
+            $nombre = trim($_POST['nombre']);
+            $apellidoPaterno = trim($_POST['apellidoPaterno']);
+            $apellidoMaterno = trim($_POST['apellidoMaterno']);
+            $telefono = trim($_POST['telefono']);
+            $correo = trim($_POST['correo']);
+            
+            $pass = trim($_POST['pass']);
+            $pass_confirm = trim($_POST['pass_confirm']);
+
+            if (!empty($pass) && $pass !== $pass_confirm) {
+                header("Location: index.php?action=showProfile&error=pass_no_coinciden");
+                exit();
+            }
+
+            // Validación de correo único (requiere AuthModel)
+            include_once "app/models/AuthModel.php";
+            $authModel = new AuthModel($this->connection);
+            $datosActuales = $this->model->getDatosMedico($idMedico);
+            
+            if ($correo != $datosActuales['correo'] && $authModel->verificarCorreoExistente($correo)) {
+                 header("Location: index.php?action=showProfile&error=correo_existe");
+                 exit();
+            }
+
+            $exito = $this->model->updatePerfilMedico($idMedico, $nombre, $apellidoPaterno, $apellidoMaterno, $telefono, $correo, $pass);
+
+            if ($exito) {
+                $_SESSION['usuario_nombre'] = $nombre . ' ' . $apellidoPaterno;
+                header("Location: index.php?action=showProfile&success=true");
+            } else {
+                header("Location: index.php?action=showProfile&error=true");
+            }
+            exit();
+        } else {
+            header("Location: index.php?action=showProfile");
+            exit();
+        }
+    }
+    
+    // --- ACCIONES DE FORO (MÉDICO) ---
+
+    public function verForoMedico() {
+        $idMedico = $_SESSION['usuario_id'];
+        $successMessage = null;
+        $errorMessage = null;
+
+        // 1. Procesar Nueva Publicación (si se envió el formulario)
+        if (isset($_POST["publicarMensaje"])) {
+            $titulo = trim($_POST['titulo']);
+            $contenido = trim($_POST['contenido']);
+            $imagenURL = null;
+
+            // Subida de imagen
+            if (isset($_FILES['imagen']) && $_FILES['imagen']['error'] == 0) {
+                $uploadDir = 'public/uploads/foro/';
+                $allowedTypes = ['image/jpeg', 'image/png'];
+                $maxSize = 2 * 1024 * 1024; 
+
+                $fileType = mime_content_type($_FILES['imagen']['tmp_name']);
+                
+                if (!in_array($fileType, $allowedTypes)) {
+                    $errorMessage = "Error: Solo JPG o PNG.";
+                } elseif ($_FILES['imagen']['size'] > $maxSize) {
+                    $errorMessage = "Error: Máximo 2MB.";
+                } else {
+                    $extension = pathinfo($_FILES['imagen']['name'], PATHINFO_EXTENSION);
+                    $fileName = uniqid('doc_', true) . '.' . $extension; // Prefijo 'doc_' para distinguir
+                    $uploadPath = $uploadDir . $fileName;
+
+                    if (move_uploaded_file($_FILES['imagen']['tmp_name'], $uploadPath)) {
+                        $imagenURL = $uploadPath;
+                    } else {
+                        $errorMessage = "Error al subir imagen.";
+                    }
+                }
+            }
+
+            if (empty($errorMessage) && !empty($contenido)) {
+                $exito = $this->model->insertarPublicacionForo($idMedico, $titulo, $contenido, $imagenURL);
+                if ($exito) {
+                    header("Location: index.php?action=verForoMedico&success=publicado");
+                    exit();
+                } else {
+                    $errorMessage = "Error al guardar en BD.";
+                }
+            }
+        }
+
+        if (isset($_GET['success']) && $_GET['success'] == 'publicado') {
+            $successMessage = "Publicación realizada exitosamente.";
+        }
+
+        // 2. Obtener publicaciones
+        $listaPublicaciones = $this->model->getPublicacionesForo($idMedico);
+
+        // 3. Obtener publicaciones
+        $listaPublicaciones = $this->model->getPublicacionesForo($idMedico);
+
+        // 4. Configurar la vista COMÚN
+        $pageTitle = "Foro Médico";
+        $activePage = 'foro';
+
+        // VARIABLE CLAVE: El médico envía a su propia acción
+        $actionForm = 'verForoMedico'; 
+
+        // Reutilizar vista
+        $viewToLoad = 'app/views/view_foro_comun.php';
+        
+        include_once 'app/views/medico/layout_medico.php';
+    }
+
+    public function reaccionarForo() {
+        if (isset($_GET['idPublicacion'])) {
+            $idPublicacion = (int)$_GET['idPublicacion'];
+            $idMedico = $_SESSION['usuario_id'];
+            $this->model->alternarReaccion($idPublicacion, $idMedico);
+        }
+        header("Location: index.php?action=verForoMedico");
+        exit();
+    }
+}
+?>
