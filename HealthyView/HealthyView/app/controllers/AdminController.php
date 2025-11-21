@@ -700,21 +700,82 @@ class AdminController {
      * Muestra la página de reportes dinámicos
      */
     public function manageReportes() {
-        
-        // 1. Obtener todos los datos de los reportes
+        // 1. Obtener reportes existentes
         $reporteGeneros = $this->model->getReportePacientesPorGenero();
         $reporteCitas = $this->model->getReporteCitasPorMedico();
         $reporteActividades = $this->model->getReporteActividadesAsignadas();
         $reporteRanking = $this->model->getReporteRankingPacientes();
         
-        // 2. Cargar la Plantilla
-        $pageTitle = "Reportes del Sistema";
+        // 2. Obtener NUEVOS reportes (Gráficos)
+        $reporteEstadoCitas = $this->model->getReporteEstadoCitas();
+        $reporteIMC = $this->model->getReporteDistribucionIMC();
+        
+        // 3. Cargar la Plantilla
+        $pageTitle = "Reportes y Estadísticas";
         $activePage = 'reportes';
         $viewToLoad = 'app/views/admin/view_reportes.php';
         
         include_once 'app/views/admin/layout_admin.php';
     }
 
+    /**
+     * EXPORTAR REPORTES (RFN-12)
+     * Genera un archivo CSV descargable con los datos estadísticos.
+     */
+    public function exportarReporte() {
+        if (!isset($_GET['tipo'])) {
+            header("Location: index.php?action=manageReportes");
+            exit();
+        }
+
+        $tipo = $_GET['tipo'];
+        $filename = "reporte_" . $tipo . "_" . date('Ymd') . ".csv";
+        
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename=' . $filename);
+        
+        $output = fopen('php://output', 'w');
+        fputs($output, "\xEF\xBB\xBF"); // BOM para Excel
+
+        // --- AQUÍ EMPIEZA EL SWITCH DONDE VA TU CÓDIGO ---
+        switch($tipo) {
+            case 'generos':
+                fputcsv($output, ['Género', 'Total Pacientes']);
+                $data = $this->model->getReportePacientesPorGenero();
+                break;
+            case 'citas':
+                fputcsv($output, ['Médico', 'Especialidad', 'Total Citas']);
+                $data = $this->model->getReporteCitasPorMedico();
+                break;
+            case 'actividades':
+                fputcsv($output, ['Actividad', 'Tipo', 'Veces Asignada']);
+                $data = $this->model->getReporteActividadesAsignadas();
+                break;
+
+            // --- PEGA AQUÍ LOS NUEVOS CASOS QUE ME MOSTRASTE ---
+            case 'estados_cita':
+                fputcsv($output, ['Estado', 'Total Citas']);
+                $data = $this->model->getReporteEstadoCitas();
+                break;
+            case 'salud_imc':
+                fputcsv($output, ['Categoría IMC', 'Total Pacientes']);
+                $data = $this->model->getReporteDistribucionIMC();
+                break;
+            // ----------------------------------------------------
+
+            default:
+                $data = [];
+        }
+        // --- FIN DEL SWITCH ---
+
+        foreach ($data as $row) {
+            fputcsv($output, $row);
+        }
+        
+        fclose($output);
+        exit();
+    }
+    
     // --- FUNCIONES FORO ADMIN ---
 
     public function getForoCompleto() {
@@ -778,5 +839,7 @@ class AdminController {
         
         include_once 'app/views/admin/layout_admin.php';
     }
+
+    
 }
 ?>

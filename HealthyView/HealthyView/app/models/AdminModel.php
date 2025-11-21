@@ -717,5 +717,39 @@ class AdminModel {
             return false;
         }
     }
+
+    // --- NUEVOS REPORTES (GRÁFICOS) ---
+
+    /**
+     * Reporte 5: Estado de las Citas (Para Gráfico de Pastel)
+     * Permite ver la eficiencia: ¿Cuántas citas se completan vs cancelan?
+     */
+    public function getReporteEstadoCitas() {
+        $sql = "SELECT estado, COUNT(*) as total 
+                FROM cita 
+                GROUP BY estado";
+        return $this->connection->query($sql)->fetch_all(MYSQLI_ASSOC);
+    }
+
+    /**
+     * Reporte 6: Distribución de Salud (IMC) (Para Gráfico de Barras)
+     * Clasifica a los pacientes según su IMC calculado.
+     */
+    public function getReporteDistribucionIMC() {
+        $sql = "SELECT 
+                    CASE 
+                        WHEN imc < 18.5 THEN 'Bajo Peso'
+                        WHEN imc BETWEEN 18.5 AND 24.9 THEN 'Peso Normal'
+                        WHEN imc BETWEEN 25 AND 29.9 THEN 'Sobrepeso'
+                        WHEN imc >= 30 THEN 'Obesidad'
+                        ELSE 'Sin Datos'
+                    END as categoria,
+                    COUNT(*) as total
+                FROM paciente
+                WHERE estado = 1
+                GROUP BY categoria
+                ORDER BY total DESC";
+        return $this->connection->query($sql)->fetch_all(MYSQLI_ASSOC);
+    }
 }
 ?>
